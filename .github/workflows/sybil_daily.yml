@@ -1,0 +1,32 @@
+name: Sybil Daily Run
+
+on:
+  schedule:
+    - cron: '0 8 * * *'  # Ogni giorno alle 09:00 ora italiana (08:00 UTC)
+  workflow_dispatch:       # Permette esecuzione manuale dal pannello GitHub
+
+jobs:
+  run-sybil:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install supabase requests
+
+      - name: Run Sybil orchestrator
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: python3 sybil_orchestrator.py

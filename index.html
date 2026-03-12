@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SYBIL — Il Campionato della Credibilità</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0a0a0f;
+    --paper: #f5f0e8;
+    --gold: #c8a84b;
+    --gold-light: #e8d08b;
+    --red: #c0392b;
+    --green: #27ae60;
+    --muted: #8a8070;
+    --border: #d4c9b0;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* NOISE TEXTURE */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 1000;
+    opacity: 0.5;
+  }
+
+  /* HEADER */
+  header {
+    border-bottom: 2px solid var(--ink);
+    padding: 0 2rem;
+    display: flex;
+    align-items: stretch;
+    justify-content: space-between;
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .logo-block {
+    padding: 1.2rem 0;
+    border-right: 1px solid rgba(255,255,255,0.15);
+    padding-right: 2rem;
+  }
+
+  .logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 3.5rem;
+    letter-spacing: 0.1em;
+    color: var(--gold);
+    line-height: 1;
+  }
+
+  .tagline {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 0.2rem;
+  }
+
+  nav {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    padding-left: 2rem;
+  }
+
+  nav a {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+
+  nav a:hover, nav a.active { color: var(--gold); }
+
+  .live-badge {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    color: var(--green);
+    text-transform: uppercase;
+  }
+
+  .live-dot {
+    width: 6px; height: 6px;
+    background: var(--green);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.4); }
+  }
+
+  /* HERO TICKER */
+  .ticker {
+    background: var(--gold);
+    color: var(--ink);
+    padding: 0.4rem 0;
+    overflow: hidden;
+    border-bottom: 1px solid var(--ink);
+  }
+
+  .ticker-inner {
+    display: flex;
+    animation: ticker 30s linear infinite;
+    white-space: nowrap;
+  }
+
+  .ticker-inner span {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    padding: 0 3rem;
+  }
+
+  .ticker-inner span::before {
+    content: '◆';
+    margin-right: 1rem;
+    opacity: 0.5;
+  }
+
+  @keyframes ticker {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+
+  /* MAIN LAYOUT */
+  main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 3rem 2rem;
+  }
+
+  /* SECTION HEADERS */
+  .section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.8rem;
+    letter-spacing: 0.08em;
+    color: var(--ink);
+  }
+
+  .section-meta {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* GRID */
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3rem;
+    margin-bottom: 4rem;
+  }
+
+  /* LEADERBOARD */
+  .leaderboard { margin-bottom: 4rem; }
+
+  .model-row {
+    display: grid;
+    grid-template-columns: 3rem 1fr repeat(4, 7rem) 6rem;
+    align-items: center;
+    padding: 1rem 1.2rem;
+    border: 1px solid var(--border);
+    margin-bottom: -1px;
+    background: white;
+    transition: all 0.2s;
+    cursor: default;
+  }
+
+  .model-row:first-child { border-radius: 4px 4px 0 0; }
+  .model-row:last-child { border-radius: 0 0 4px 4px; }
+
+  .model-row:hover {
+    background: #fffdf7;
+    z-index: 1;
+    position: relative;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  }
+
+  .model-row.header {
+    background: var(--ink);
+    color: var(--paper);
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    cursor: default;
+  }
+
+  .model-row.header:hover { box-shadow: none; }
+
+  .rank {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.6rem;
+    color: var(--muted);
+    line-height: 1;
+  }
+
+  .rank.gold { color: var(--gold); }
+  .rank.silver { color: #999; }
+  .rank.bronze { color: #cd7f32; }
+
+  .model-info { }
+
+  .model-name {
+    font-weight: 500;
+    font-size: 0.95rem;
+    margin-bottom: 0.15rem;
+  }
+
+  .model-provider {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+  }
+
+  .stat {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.85rem;
+    text-align: center;
+  }
+
+  .score-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .score-bar {
+    flex: 1;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .score-fill {
+    height: 100%;
+    background: var(--gold);
+    border-radius: 2px;
+    transition: width 1s ease;
+  }
+
+  .score-value {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.4rem;
+    color: var(--ink);
+    min-width: 3rem;
+    text-align: right;
+  }
+
+  /* DAILY CHALLENGE */
+  .challenge-card {
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 4px;
+    padding: 2rem;
+    margin-bottom: 4rem;
+  }
+
+  .challenge-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .challenge-question {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 1.4rem;
+    font-weight: 300;
+    line-height: 1.4;
+    margin-bottom: 2rem;
+    max-width: 700px;
+  }
+
+  .challenge-responses {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+  }
+
+  .response-card {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 4px;
+    padding: 1rem 1.2rem;
+    transition: background 0.2s;
+  }
+
+  .response-card:hover { background: rgba(255,255,255,0.08); }
+
+  .response-model {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.4);
+    margin-bottom: 0.5rem;
+  }
+
+  .response-value {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 2rem;
+    color: var(--gold-light);
+    line-height: 1;
+  }
+
+  .response-value.refused {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--red);
+    letter-spacing: 0.1em;
+  }
+
+  .response-status {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    margin-top: 0.4rem;
+    color: rgba(255,255,255,0.3);
+  }
+
+  .response-status.correct { color: var(--green); }
+  .response-status.wrong { color: var(--red); }
+
+  /* CATEGORIES */
+  .categories {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 4rem;
+  }
+
+  .category-tile {
+    background: white;
+    padding: 1.5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .category-tile:hover { background: #fffdf7; }
+  .category-tile.locked { opacity: 0.5; cursor: default; }
+
+  .cat-icon {
+    font-size: 1.8rem;
+    margin-bottom: 0.5rem;
+    display: block;
+  }
+
+  .cat-name {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.1rem;
+    letter-spacing: 0.08em;
+    color: var(--ink);
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+
+  .cat-count {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+  }
+
+  .cat-lock {
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin-top: 0.3rem;
+    display: block;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.1em;
+  }
+
+  /* LOADING */
+  .loading {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    padding: 2rem;
+    text-align: center;
+    animation: blink 1.5s infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* FOOTER */
+  footer {
+    border-top: 2px solid var(--ink);
+    background: var(--ink);
+    color: rgba(255,255,255,0.3);
+    padding: 1.5rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  footer .foot-logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.2rem;
+    letter-spacing: 0.1em;
+    color: var(--gold);
+  }
+
+  footer p {
+    font-family: 'DM Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+  }
+
+  /* RESPONSIVE */
+  @media (max-width: 768px) {
+    .grid-2 { grid-template-columns: 1fr; }
+    .model-row { grid-template-columns: 2rem 1fr 5rem; }
+    .model-row .stat:not(:last-child) { display: none; }
+    .challenge-responses { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-block">
+    <div class="logo">SYBIL</div>
+    <div class="tagline">Il Campionato della Credibilità</div>
+  </div>
+  <nav>
+    <a href="#" class="active">Classifica</a>
+    <a href="#">Daily Challenge</a>
+    <a href="#">Categorie</a>
+    <a href="#">Chi siamo</a>
+  </nav>
+  <div class="live-badge">
+    <div class="live-dot"></div>
+    Live
+  </div>
+</header>
+
+<div class="ticker">
+  <div class="ticker-inner" id="ticker-text">
+    <span>Chi ha davvero ragione? I numeri lo diranno</span>
+    <span>Campionato AI in corso — Stagione 2026</span>
+    <span>Daily Challenge aggiornato ogni giorno alle 09:00</span>
+    <span>Classifiche Finanza e Crypto disponibili per gli abbonati</span>
+    <span>Chi ha davvero ragione? I numeri lo diranno</span>
+    <span>Campionato AI in corso — Stagione 2026</span>
+    <span>Daily Challenge aggiornato ogni giorno alle 09:00</span>
+    <span>Classifiche Finanza e Crypto disponibili per gli abbonati</span>
+  </div>
+</div>
+
+<main>
+
+  <!-- CLASSIFICA GENERALE -->
+  <div class="leaderboard">
+    <div class="section-header">
+      <div class="section-title">Classifica Generale</div>
+      <div class="section-meta" id="last-updated">Caricamento...</div>
+    </div>
+
+    <div class="model-row header">
+      <div>#</div>
+      <div>Modello</div>
+      <div style="text-align:center">Domande</div>
+      <div style="text-align:center">Corrette</div>
+      <div style="text-align:center">Rifiuti</div>
+      <div style="text-align:center">Errori</div>
+      <div style="text-align:right">Score</div>
+    </div>
+
+    <div id="leaderboard-rows">
+      <div class="loading">Caricamento classifica...</div>
+    </div>
+  </div>
+
+  <!-- DAILY CHALLENGE -->
+  <div class="challenge-card">
+    <div class="challenge-label">
+      <div class="live-dot"></div>
+      Daily Challenge di oggi
+    </div>
+    <div class="challenge-question" id="challenge-question">
+      Caricamento domanda del giorno...
+    </div>
+    <div class="challenge-responses" id="challenge-responses">
+    </div>
+  </div>
+
+  <!-- CATEGORIE -->
+  <div class="section-header">
+    <div class="section-title">Categorie</div>
+    <div class="section-meta">Clicca per vedere la classifica per settore</div>
+  </div>
+
+  <div class="categories">
+    <div class="category-tile" onclick="loadCategory('meteo')">
+      <span class="cat-icon">🌤</span>
+      <span class="cat-name">Meteo</span>
+      <span class="cat-count" id="count-meteo">— domande</span>
+    </div>
+    <div class="category-tile locked">
+      <span class="cat-icon">⚽</span>
+      <span class="cat-name">Sport</span>
+      <span class="cat-count">Premium</span>
+      <span class="cat-lock">🔒 abbonati</span>
+    </div>
+    <div class="category-tile locked">
+      <span class="cat-icon">📈</span>
+      <span class="cat-name">Finanza</span>
+      <span class="cat-count">Premium</span>
+      <span class="cat-lock">🔒 abbonati</span>
+    </div>
+    <div class="category-tile locked">
+      <span class="cat-icon">₿</span>
+      <span class="cat-name">Crypto</span>
+      <span class="cat-count">Premium</span>
+      <span class="cat-lock">🔒 abbonati</span>
+    </div>
+    <div class="category-tile" onclick="loadCategory('geopolitica')">
+      <span class="cat-icon">🌍</span>
+      <span class="cat-name">Geopolitica</span>
+      <span class="cat-count" id="count-geopolitica">— domande</span>
+    </div>
+    <div class="category-tile" onclick="loadCategory('economia')">
+      <span class="cat-icon">📊</span>
+      <span class="cat-name">Economia</span>
+      <span class="cat-count" id="count-economia">— domande</span>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  <div class="foot-logo">SYBIL</div>
+  <p>Chi ha davvero ragione? I numeri lo diranno.</p>
+  <p>© 2026 Sybil — Andrea Fleber</p>
+</footer>
+
+<script>
+  const SUPABASE_URL = 'https://mkmihvdmenjjaspoqowy.supabase.co';
+  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1rbWlodmRtZW5qamFzcG9xb3d5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNTc3MzYsImV4cCI6MjA4ODgzMzczNn0.mzns7zfwzGAKkPJ-rnpZ_DTLxBR2zg26XQd20ngkREg';
+
+  async function supabase(path) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`
+      }
+    });
+    return res.json();
+  }
+
+  const rankClass = (i) => i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+
+  async function loadLeaderboard() {
+    const models = await supabase('ai_models?select=*&active=eq.true');
+    const scores = await supabase('scores?select=*');
+
+    if (!models.length) {
+      document.getElementById('leaderboard-rows').innerHTML = '<div class="loading">Nessun dato disponibile</div>';
+      return;
+    }
+
+    // Calcola score globale per modello
+    const modelScores = models.map(m => {
+      const mScores = scores.filter(s => s.model_id === m.id);
+      const total = mScores.reduce((a, s) => a + s.total_questions, 0);
+      const correct = mScores.reduce((a, s) => a + s.correct, 0);
+      const refused = mScores.reduce((a, s) => a + s.refused, 0);
+      const wrong = total - correct - refused;
+      const score = total > 0 ? Math.round((correct / total) * 100) : 0;
+      return { ...m, total, correct, refused, wrong, score };
+    }).sort((a, b) => b.score - a.score);
+
+    const html = modelScores.map((m, i) => `
+      <div class="model-row">
+        <div class="rank ${rankClass(i)}">${i + 1}</div>
+        <div class="model-info">
+          <div class="model-name">${m.name}</div>
+          <div class="model-provider">${m.provider}</div>
+        </div>
+        <div class="stat">${m.total || '—'}</div>
+        <div class="stat" style="color:var(--green)">${m.correct || '—'}</div>
+        <div class="stat" style="color:var(--muted)">${m.refused || '—'}</div>
+        <div class="stat" style="color:var(--red)">${m.wrong || '—'}</div>
+        <div class="score-bar-wrap">
+          <div class="score-bar"><div class="score-fill" style="width:${m.score}%"></div></div>
+          <div class="score-value">${m.score || '—'}</div>
+        </div>
+      </div>
+    `).join('');
+
+    document.getElementById('leaderboard-rows').innerHTML = html;
+    document.getElementById('last-updated').textContent =
+      'Aggiornato ' + new Date().toLocaleString('it-IT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+
+  async function loadDailyChallenge() {
+    const now = new Date().toISOString();
+    const questions = await supabase(
+      `questions?select=*&deadline=gt.${now}&order=created_at.desc&limit=1`
+    );
+
+    if (!questions.length) {
+      document.getElementById('challenge-question').textContent = 'Nessuna domanda attiva al momento.';
+      return;
+    }
+
+    const q = questions[0];
+    document.getElementById('challenge-question').textContent = q.text;
+
+    const responses = await supabase(
+      `responses?select=*,ai_models(name,provider)&question_id=eq.${q.id}`
+    );
+
+    const models = await supabase('ai_models?select=*&active=eq.true');
+
+    if (!responses.length) {
+      document.getElementById('challenge-responses').innerHTML =
+        '<div style="color:rgba(255,255,255,0.3);font-family:\'DM Mono\',monospace;font-size:0.75rem;">In attesa delle risposte dei modelli...</div>';
+      return;
+    }
+
+    const html = responses.map(r => {
+      const modelName = r.ai_models ? r.ai_models.name : 'Modello';
+      const provider = r.ai_models ? r.ai_models.provider : '';
+      const isRefused = r.refused;
+      const statusClass = q.verified
+        ? (r.response_value === q.correct_value ? 'correct' : 'wrong')
+        : '';
+      const statusText = q.verified
+        ? (r.response_value === q.correct_value ? '✓ Corretto' : '✗ Errato')
+        : 'In attesa di verifica';
+
+      return `
+        <div class="response-card">
+          <div class="response-model">${modelName} · ${provider}</div>
+          <div class="response-value ${isRefused ? 'refused' : ''}">${isRefused ? 'RIFIUTO' : r.response_value}</div>
+          <div class="response-status ${statusClass}">${statusText}</div>
+        </div>
+      `;
+    }).join('');
+
+    document.getElementById('challenge-responses').innerHTML = html;
+  }
+
+  async function loadCategoryCounts() {
+    const categories = ['meteo', 'geopolitica', 'economia'];
+    for (const cat of categories) {
+      const data = await supabase(`questions?select=id&category=eq.${cat}`);
+      const el = document.getElementById(`count-${cat}`);
+      if (el) el.textContent = `${data.length} domande`;
+    }
+  }
+
+  function loadCategory(cat) {
+    // Placeholder — in futuro apre modal con classifica per categoria
+    alert(`Classifica ${cat} — prossimamente!`);
+  }
+
+  // Init
+  loadLeaderboard();
+  loadDailyChallenge();
+  loadCategoryCounts();
+</script>
+</body>
+</html>

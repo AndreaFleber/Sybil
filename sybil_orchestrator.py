@@ -286,7 +286,13 @@ def run():
                     update_scores(resp["model_id"], q["category"], correct=False, refused=True)
                 else:
                     # Confronto semplice per ora (migliorare con tolleranza numerica)
-                    is_correct = resp["response_value"].strip().lower() == correct_value.strip().lower()
+                    # Confronto con tolleranza per valori numerici
+try:
+    resp_num = float(resp["response_value"].strip())
+    correct_num = float(correct_value.strip())
+    is_correct = abs(resp_num - correct_num) <= 2.0
+except ValueError:
+    is_correct = resp["response_value"].strip().lower() == correct_value.strip().lower()
                     update_scores(resp["model_id"], q["category"], correct=is_correct, refused=False)
         else:
             print(f"  ⏳ [{q['category']}] Verifica manuale necessaria: {q['text'][:50]}...")

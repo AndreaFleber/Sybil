@@ -1,11 +1,10 @@
 """
-SYBIL — Orchestratore principale v0.1
-Interroga le AI, registra le risposte, aggiorna gli score.
+SYBIL — Orchestratore principale v0.2
+Interroga le AI, registra le risposte, verifica esiti, aggiorna score.
 Eseguito ogni giorno da GitHub Actions.
 """
 
 import os
-import json
 import requests
 from datetime import datetime, timezone
 from supabase import create_client, Client
@@ -106,11 +105,7 @@ def ask_groq(prompt: str, model_string: str) -> str:
 
 
 # ─── ROUTER ──────────────────────────────────────────────────────────────────
-def ask_model(model: dict, prompt: str) -> tuple[str, bool]:
-    """
-    Ritorna (risposta, refused).
-    refused=True se il modello non ha risposto nel formato atteso.
-    """
+def ask_model(model: dict, prompt: str) -> tuple:
     provider = model["provider"].lower()
     model_string = model["model_string"]
     try:
@@ -125,9 +120,8 @@ def ask_model(model: dict, prompt: str) -> tuple[str, bool]:
         else:
             return "PROVIDER_SCONOSCIUTO", True
 
-        # Risposta troppo lunga = probabile disclaimer = rifiuto
         if len(raw) > 100:
-            print(f"  ⚠️  {model['name']}: risposta troppo lunga ({len(raw)} chars), registrato come rifiuto")
+            print(f"  ⚠️  {model['name']}: risposta troppo lunga, registrato come rifiuto")
             return raw[:200], True
 
         return raw, False
@@ -137,37 +131,25 @@ def ask_model(model: dict, prompt: str) -> tuple[str, bool]:
         return f"ERRORE: {str(e)}", True
 
 
-# ─── VERIFICA ESITI ──────────────────────────────────────────────────────────
-def verify_meteo_question(question: dict) -> str | None:
-    """
-    Verifica automatica domande meteo tramite Open-Meteo API.
-    Ritorna il valore corretto come stringa, o None se non verificabile.
-    """
-    # Coordinate Milano (default per ora)
-    lat, lon = 45.4642, 9.1900
-    yesterday = (datetime.now(timezone.utc)).strftime("%Y-%m-%d")
-    url = (
-        f"https://api.open-meteo.com/v1/forecast"
-        f"?latitude={lat}&longitude={lon}"
-        f"&daily=temperature_2m_max"
-        f"&start_date={yesterday}&end_date={yesterday}"
-        f"&timezone=Europe/Rome"
-    )
+# ─── CONFRONTO RISPOSTE ───────────────────────────────────────────────────────
+def is_correct(response_value: str, correct_value: str, question_type: str) -> bool:
     try:
-        r = requests.get(url, timeout=15)
-        r.raise_for_status()
-        data = r.json()
-        temp_max = data["daily"]["temperature_2m_max"][0]
-        return str(round(temp_max, 1))
-    except Exception as e:
-        print(f"  ⚠️  Verifica meteo fallita: {e}")
-        return None
+        if question_type == "numeric":
+            resp_num = float(response_value.strip().replace(",", "."))
+            correct_num = float(correct_value.strip().replace(",", "."))
+            return abs(resp_num - correct_num) <= 2.0
+        elif question_type == "binary":
+            r = response_value.strip().upper()
+            c = correct_value.strip().upper()
+            return r == c
+        else:
+            return response_value.strip().lower() == correct_value.strip().lower()
+    except (ValueError, AttributeError):
+        return False
 
 
-# ─── CALCOLO SCORE ────────────────────────────────────────────────────────────
+# ─── AGGIORNAMENTO SCORE ──────────────────────────────────────────────────────
 def update_scores(model_id: str, category: str, correct: bool, refused: bool):
-    """Aggiorna lo score di un modello per una categoria."""
-    # Recupera score attuale
     result = supabase.table("scores").select("*").eq("model_id", model_id).eq("category", category).execute()
 
     if result.data:
@@ -184,7 +166,6 @@ def update_scores(model_id: str, category: str, correct: bool, refused: bool):
             "updated_at": datetime.now(timezone.utc).isoformat()
         }).eq("model_id", model_id).eq("category", category).execute()
     else:
-        # Prima entry per questo modello/categoria
         supabase.table("scores").insert({
             "model_id": model_id,
             "category": category,
@@ -195,33 +176,75 @@ def update_scores(model_id: str, category: str, correct: bool, refused: bool):
         }).execute()
 
 
-# ─── PIPELINE PRINCIPALE ─────────────────────────────────────────────────────
+# ─── VERIFICA METEO ───────────────────────────────────────────────────────────
+CITY_COORDS = {
+    "milano": (45.4642, 9.1900),
+    "roma": (41.9028, 12.4964),
+    "napoli": (40.8518, 14.2681),
+    "torino": (45.0703, 7.6869),
+    "firenze": (43.7696, 11.2558),
+}
+
+def verify_meteo_question(question: dict) -> str | None:
+    text_lower = question["text"].lower()
+    coords = None
+    for city, c in CITY_COORDS.items():
+        if city in text_lower:
+            coords = c
+            break
+    if not coords:
+        return None
+
+    lat, lon = coords
+    # Usa la data della deadline come data di verifica
+    deadline = datetime.fromisoformat(question["deadline"].replace("Z", "+00:00"))
+    date_str = deadline.strftime("%Y-%m-%d")
+
+    url = (
+        f"https://api.open-meteo.com/v1/forecast"
+        f"?latitude={lat}&longitude={lon}"
+        f"&daily=temperature_2m_max"
+        f"&start_date={date_str}&end_date={date_str}"
+        f"&timezone=Europe/Rome"
+    )
+    try:
+        r = requests.get(url, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        temp_max = data["daily"]["temperature_2m_max"][0]
+        if temp_max is None:
+            return None
+        return str(round(temp_max, 1))
+    except Exception as e:
+        print(f"  ⚠️  Verifica meteo fallita: {e}")
+        return None
+
+
+# ─── PIPELINE PRINCIPALE ──────────────────────────────────────────────────────
 def run():
     print(f"\n🔮 SYBIL — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
     print("=" * 60)
 
-    # 1. Carica modelli attivi
     models = supabase.table("ai_models").select("*").eq("active", True).execute().data
     print(f"📊 Modelli attivi: {len(models)}")
 
-    # 2. Carica domande aperte (senza risposta ancora, deadline non scaduta)
     now = datetime.now(timezone.utc).isoformat()
-    questions = (
+
+    # ── 1. Interroga modelli su domande aperte non scadute ──
+    questions_open = (
         supabase.table("questions")
         .select("*")
         .eq("verified", False)
         .gt("deadline", now)
         .execute().data
     )
-    print(f"❓ Domande aperte: {len(questions)}")
+    print(f"❓ Domande aperte: {len(questions_open)}")
 
-    # 3. Per ogni domanda, interroga i modelli che non hanno ancora risposto
-    for q in questions:
+    for q in questions_open:
         print(f"\n📌 [{q['category'].upper()}] {q['text'][:60]}...")
         prompt = build_prompt(q["text"], q["type"])
 
         for model in models:
-            # Controlla se ha già risposto
             existing = (
                 supabase.table("responses")
                 .select("id")
@@ -237,7 +260,6 @@ def run():
             response_value, refused = ask_model(model, prompt)
             print(f"→ {'RIFIUTO' if refused else response_value}")
 
-            # Salva risposta
             supabase.table("responses").insert({
                 "question_id": q["id"],
                 "model_id": model["id"],
@@ -246,7 +268,7 @@ def run():
                 "prompt_used": prompt
             }).execute()
 
-    # 4. Verifica esiti scaduti non ancora verificati
+    # ── 2. Verifica esiti scaduti ──
     print("\n🔍 Verifica esiti scaduti...")
     expired = (
         supabase.table("questions")
@@ -260,42 +282,99 @@ def run():
     for q in expired:
         correct_value = None
 
-        # Auto-verifica meteo
         if q["auto_verify"] and q["category"] == "meteo":
             correct_value = verify_meteo_question(q)
 
         if correct_value:
-            # Aggiorna domanda con esito
             supabase.table("questions").update({
                 "correct_value": correct_value,
                 "verified": True,
                 "verified_at": datetime.now(timezone.utc).isoformat()
             }).eq("id", q["id"]).execute()
+            print(f"  ✅ [{q['category']}] {q['text'][:40]} → Esito: {correct_value}")
+        else:
+            print(f"  ⏳ [{q['category']}] Verifica manuale: {q['text'][:50]}...")
 
-            print(f"  ✅ [{q['category']}] Esito: {correct_value}")
+    # ── 3. Aggiorna score per TUTTE le domande verificate ──
+    print("\n📈 Aggiornamento score...")
+    verified_questions = (
+        supabase.table("questions")
+        .select("*")
+        .eq("verified", True)
+        .execute().data
+    )
 
-            # Aggiorna score per ogni modello
-            responses = (
-                supabase.table("responses")
-                .select("*")
-                .eq("question_id", q["id"])
+    for q in verified_questions:
+        if not q["correct_value"]:
+            continue
+
+        responses = (
+            supabase.table("responses")
+            .select("*")
+            .eq("question_id", q["id"])
+            .execute().data
+        )
+
+        for resp in responses:
+            # Controlla se lo score per questa risposta è già stato conteggiato
+            # usando un flag nella tabella responses (campo score_counted)
+            # Per ora ricalcoliamo tutto da zero ogni volta
+            pass
+
+    # Ricalcola score da zero per ogni modello/categoria
+    for model in models:
+        categories = set()
+        all_responses = (
+            supabase.table("responses")
+            .select("*, questions(category, correct_value, verified, type)")
+            .eq("model_id", model["id"])
+            .execute().data
+        )
+
+        # Raggruppa per categoria
+        cat_data = {}
+        for resp in all_responses:
+            q = resp.get("questions")
+            if not q:
+                continue
+            cat = q["category"]
+            if cat not in cat_data:
+                cat_data[cat] = {"total": 0, "correct": 0, "refused": 0}
+            cat_data[cat]["total"] += 1
+            if resp["refused"]:
+                cat_data[cat]["refused"] += 1
+            elif q["verified"] and q["correct_value"]:
+                if is_correct(resp["response_value"], q["correct_value"], q["type"]):
+                    cat_data[cat]["correct"] += 1
+
+        for cat, data in cat_data.items():
+            score = round((data["correct"] / data["total"]) * 100, 2) if data["total"] > 0 else 0
+            existing = (
+                supabase.table("scores")
+                .select("id")
+                .eq("model_id", model["id"])
+                .eq("category", cat)
                 .execute().data
             )
-            for resp in responses:
-                if resp["refused"]:
-                    update_scores(resp["model_id"], q["category"], correct=False, refused=True)
-                else:
-                    # Confronto semplice per ora (migliorare con tolleranza numerica)
-                    # Confronto con tolleranza per valori numerici
-try:
-    resp_num = float(resp["response_value"].strip())
-    correct_num = float(correct_value.strip())
-    is_correct = abs(resp_num - correct_num) <= 2.0
-except ValueError:
-    is_correct = resp["response_value"].strip().lower() == correct_value.strip().lower()
-                    update_scores(resp["model_id"], q["category"], correct=is_correct, refused=False)
-        else:
-            print(f"  ⏳ [{q['category']}] Verifica manuale necessaria: {q['text'][:50]}...")
+            if existing:
+                supabase.table("scores").update({
+                    "total_questions": data["total"],
+                    "correct": data["correct"],
+                    "refused": data["refused"],
+                    "score": score,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }).eq("model_id", model["id"]).eq("category", cat).execute()
+            else:
+                supabase.table("scores").insert({
+                    "model_id": model["id"],
+                    "category": cat,
+                    "total_questions": data["total"],
+                    "correct": data["correct"],
+                    "refused": data["refused"],
+                    "score": score
+                }).execute()
+
+        print(f"  ✓ {model['name']}: score aggiornato per {len(cat_data)} categorie")
 
     print("\n✅ Pipeline completata.")
 

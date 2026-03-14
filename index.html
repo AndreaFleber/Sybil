@@ -620,7 +620,8 @@
       const correct = mScores.reduce((a, s) => a + s.correct, 0);
       const refused = mScores.reduce((a, s) => a + s.refused, 0);
       const wrong = total - correct - refused;
-      const score = total > 0 ? Math.round((correct / total) * 100) : 0;
+      const judged = correct + (m.wrong || 0);
+const score = judged > 0 ? Math.round((correct / judged) * 100) : null;
       return { ...m, total, correct, refused, wrong, score };
     }).sort((a, b) => {
   if (b.score !== a.score) return b.score - a.score;
@@ -640,7 +641,7 @@
         <div class="stat" style="color:var(--red)">${m.wrong || '—'}</div>
         <div class="score-bar-wrap">
           <div class="score-bar"><div class="score-fill" style="width:${m.score}%"></div></div>
-          <div class="score-value">${m.score || '—'}</div>
+          <div class="score-value">${score !== null ? score : '—'}</div>
         </div>
       </div>
     `).join('');

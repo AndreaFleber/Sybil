@@ -1,12 +1,14 @@
 """
-SYBIL — Orchestratore principale v0.2
+SYBIL — Orchestratore principale v0.3
 Interroga le AI, registra le risposte, verifica esiti, aggiorna score.
+Genera automaticamente nuove domande tramite AI.
 Eseguito ogni giorno da GitHub Actions.
 """
 
 import os
+import json
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from supabase import create_client, Client
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
@@ -196,7 +198,6 @@ def verify_meteo_question(question: dict) -> str | None:
         return None
 
     lat, lon = coords
-    # Usa la data della deadline come data di verifica
     deadline = datetime.fromisoformat(question["deadline"].replace("Z", "+00:00"))
     date_str = deadline.strftime("%Y-%m-%d")
 
@@ -220,6 +221,202 @@ def verify_meteo_question(question: dict) -> str | None:
         return None
 
 
+# ─── GENERAZIONE AUTOMATICA DOMANDE ──────────────────────────────────────────
+# Numero massimo di nuove domande da inserire per run
+MAX_NEW_QUESTIONS = 5
+
+# Soglia minima di domande aperte prima di generarne di nuove
+MIN_OPEN_QUESTIONS = 3
+
+def build_question_generation_prompt(today_str: str) -> str:
+    """
+    Costruisce il prompt per chiedere all'AI di suggerire
+    eventi verificabili imminenti come domande per Sybil.
+    """
+    horizon_date = (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%d")
+    return f"""Oggi è {today_str}. Sei un generatore di domande per Sybil, un campionato di accuratezza predittiva tra modelli AI.
+
+Genera esattamente 5 domande su eventi REALI e VERIFICABILI che accadranno entro il {horizon_date}.
+Le domande devono riguardare eventi con esito oggettivo e pubblicamente verificabile (sport, meteo, politica, finanza, cronaca).
+
+Regole:
+- Ogni domanda deve avere risposta binaria (SÌ/NO) oppure numerica
+- L'esito deve essere verificabile online senza ambiguità
+- Preferisci eventi italiani o europei
+- Evita domande vaghe o soggettive
+- La deadline deve essere il giorno in cui l'esito sarà noto, in formato ISO 8601 (es. 2025-03-25T22:00:00Z)
+
+Rispondi SOLO con un array JSON valido, senza markdown, senza testo aggiuntivo, nel formato:
+[
+  {{
+    "text": "testo della domanda in italiano",
+    "category": "sport|meteo|politica|finanza|cronaca",
+    "type": "binary|numeric",
+    "deadline": "YYYY-MM-DDTHH:MM:SSZ",
+    "auto_verify": false
+  }}
+]"""
+
+
+def generate_questions_via_groq() -> list[dict]:
+    """Genera domande usando Groq (llama-3.1-8b-instant)."""
+    if not GROQ_API_KEY:
+        raise ValueError("GROQ_API_KEY non impostata")
+
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    prompt = build_question_generation_prompt(today_str)
+
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "llama-3.1-8b-instant",
+        "max_tokens": 1000,
+        "temperature": 0.7,
+        "messages": [{"role": "user", "content": prompt}]
+    }
+    r = requests.post(url, headers=headers, json=payload, timeout=30)
+    r.raise_for_status()
+    raw = r.json()["choices"][0]["message"]["content"].strip()
+
+    # Pulizia: rimuove eventuali backtick markdown
+    raw = raw.replace("```json", "").replace("```", "").strip()
+    return json.loads(raw)
+
+
+def generate_questions_via_gemini() -> list[dict]:
+    """Genera domande usando Gemini come fallback."""
+    if not GEMINI_API_KEY:
+        raise ValueError("GEMINI_API_KEY non impostata")
+
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    prompt = build_question_generation_prompt(today_str)
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    r = requests.post(url, json=payload, timeout=30)
+    r.raise_for_status()
+    raw = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+    raw = raw.replace("```json", "").replace("```", "").strip()
+    return json.loads(raw)
+
+
+def is_duplicate_question(text: str, existing_texts: list[str]) -> bool:
+    """
+    Controllo semplice anti-duplicati: confronta le prime 40 caratteri
+    della domanda normalizzata con quelle già presenti.
+    """
+    normalized = text.strip().lower()[:40]
+    for existing in existing_texts:
+        if existing.strip().lower()[:40] == normalized:
+            return True
+    return False
+
+
+def generate_and_insert_questions():
+    """
+    Modulo principale di generazione automatica domande.
+    Viene eseguito all'inizio della pipeline se le domande aperte
+    sono sotto la soglia minima.
+    """
+    print("\n🧠 Generazione automatica domande...")
+
+    # Conta domande aperte attuali
+    now = datetime.now(timezone.utc).isoformat()
+    open_questions = (
+        supabase.table("questions")
+        .select("id, text")
+        .eq("verified", False)
+        .gt("deadline", now)
+        .execute().data
+    )
+    open_count = len(open_questions)
+    print(f"   Domande aperte: {open_count} (soglia minima: {MIN_OPEN_QUESTIONS})")
+
+    if open_count >= MIN_OPEN_QUESTIONS:
+        print(f"   ✅ Soglia raggiunta, generazione non necessaria.")
+        return
+
+    existing_texts = [q["text"] for q in open_questions]
+
+    # Tenta prima con Groq, poi con Gemini come fallback
+    candidates = []
+    try:
+        print("   🤖 Chiamata Groq per suggerimenti domande...")
+        candidates = generate_questions_via_groq()
+        print(f"   → {len(candidates)} domande suggerite da Groq")
+    except Exception as e:
+        print(f"   ⚠️  Groq fallito: {e}")
+        try:
+            print("   🤖 Fallback su Gemini...")
+            candidates = generate_questions_via_gemini()
+            print(f"   → {len(candidates)} domande suggerite da Gemini")
+        except Exception as e2:
+            print(f"   ❌ Anche Gemini ha fallito: {e2}")
+            return
+
+    # Valida e inserisce le domande
+    inserted = 0
+    for q in candidates:
+        if inserted >= MAX_NEW_QUESTIONS:
+            break
+
+        # Validazione campi obbligatori
+        required_fields = ["text", "category", "type", "deadline"]
+        if not all(f in q for f in required_fields):
+            print(f"   ⚠️  Domanda saltata (campi mancanti): {q}")
+            continue
+
+        # Validazione tipo
+        if q["type"] not in ("binary", "numeric", "percentage"):
+            print(f"   ⚠️  Tipo non valido '{q['type']}', saltata.")
+            continue
+
+        # Validazione categoria
+        valid_categories = {"sport", "meteo", "politica", "finanza", "cronaca"}
+        if q["category"] not in valid_categories:
+            print(f"   ⚠️  Categoria non valida '{q['category']}', saltata.")
+            continue
+
+        # Validazione deadline (deve essere nel futuro)
+        try:
+            deadline_dt = datetime.fromisoformat(q["deadline"].replace("Z", "+00:00"))
+            if deadline_dt <= datetime.now(timezone.utc):
+                print(f"   ⚠️  Deadline nel passato, saltata: {q['text'][:50]}")
+                continue
+        except (ValueError, AttributeError):
+            print(f"   ⚠️  Deadline non valida, saltata: {q['text'][:50]}")
+            continue
+
+        # Anti-duplicati
+        if is_duplicate_question(q["text"], existing_texts):
+            print(f"   ⏭️  Duplicato, saltata: {q['text'][:50]}")
+            continue
+
+        # Inserimento in Supabase
+        new_question = {
+            "text": q["text"].strip(),
+            "category": q["category"],
+            "type": q["type"],
+            "deadline": q["deadline"],
+            "auto_verify": q.get("auto_verify", False),
+            "verified": False,
+        }
+
+        try:
+            supabase.table("questions").insert(new_question).execute()
+            existing_texts.append(q["text"])
+            inserted += 1
+            print(f"   ✅ Inserita [{q['category'].upper()}]: {q['text'][:60]}...")
+        except Exception as e:
+            print(f"   ❌ Errore inserimento: {e}")
+
+    print(f"   📝 Domande inserite: {inserted}")
+
+
 # ─── PIPELINE PRINCIPALE ──────────────────────────────────────────────────────
 def run():
     print(f"\n🔮 SYBIL — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
@@ -230,6 +427,9 @@ def run():
 
     now = datetime.now(timezone.utc).isoformat()
 
+    # ── 0. Genera nuove domande se necessario ──
+    generate_and_insert_questions()
+
     # ── 1. Interroga modelli su domande aperte non scadute ──
     questions_open = (
         supabase.table("questions")
@@ -238,7 +438,7 @@ def run():
         .gt("deadline", now)
         .execute().data
     )
-    print(f"❓ Domande aperte: {len(questions_open)}")
+    print(f"\n❓ Domande aperte: {len(questions_open)}")
 
     for q in questions_open:
         print(f"\n📌 [{q['category'].upper()}] {q['text'][:60]}...")
@@ -304,26 +504,7 @@ def run():
         .execute().data
     )
 
-    for q in verified_questions:
-        if not q["correct_value"]:
-            continue
-
-        responses = (
-            supabase.table("responses")
-            .select("*")
-            .eq("question_id", q["id"])
-            .execute().data
-        )
-
-        for resp in responses:
-            # Controlla se lo score per questa risposta è già stato conteggiato
-            # usando un flag nella tabella responses (campo score_counted)
-            # Per ora ricalcoliamo tutto da zero ogni volta
-            pass
-
-    # Ricalcola score da zero per ogni modello/categoria
     for model in models:
-        categories = set()
         all_responses = (
             supabase.table("responses")
             .select("*, questions(category, correct_value, verified, type)")
@@ -331,7 +512,6 @@ def run():
             .execute().data
         )
 
-        # Raggruppa per categoria
         cat_data = {}
         for resp in all_responses:
             q = resp.get("questions")
